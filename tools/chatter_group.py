@@ -180,6 +180,7 @@ from chatter_group_handlers import (
     execute_player_msg_conversation,
 )
 from chatter_links import resolve_and_format_links
+from chatter_quest_help import quest_help_context
 from chatter_memory import (
     start_session,
     queue_memory,
@@ -1928,6 +1929,12 @@ def process_group_player_msg_event(
 
     try:
         mode = get_chatter_mode(config)
+        quest_context = quest_help_context(
+            db, config, int(event.get('subject_guid') or 0),
+            raw_player_message,
+        )
+        if quest_context:
+            brief_casual = False
         # history/chat_hist fetched above for
         # bot selection — reuse here
         members = get_group_members(db, group_id)
@@ -1997,7 +2004,7 @@ def process_group_player_msg_event(
                 <= eff_conv_chance
         )
 
-        if force_conv or rng_conv:
+        if not quest_context and (force_conv or rng_conv):
             trigger = (
                 "multi_addressed"
                 if force_conv else
@@ -2144,6 +2151,8 @@ def process_group_player_msg_event(
         prompt = with_party_genders(
             prompt, db, group_id, bot['name'],
         )
+        if quest_context:
+            prompt += quest_context
 
         max_tokens = pick_random_max_tokens(config)
         if msg_memories:
@@ -2269,7 +2278,7 @@ def process_group_player_msg_event(
 
         # Second bot chance — MUTUAL EXCLUSION:
         # skip if conversation path was used
-        if not used_conversation and not brief_casual:
+        if not used_conversation and not brief_casual and not quest_context:
             second_chance = int(config.get(
                 'LLMChatter.GroupChatter'
                 '.PlayerMsgSecondBotChance',

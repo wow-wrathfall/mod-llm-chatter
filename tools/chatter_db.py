@@ -20,7 +20,7 @@ from chatter_constants import (
     ZONE_COORDINATES,
     ZONE_LEVELS,
 )
-from chatter_text import split_action_prefix, strip_emojis
+from chatter_text import is_model_artifact, split_action_prefix, strip_emojis
 from spell_names import SPELL_DESCRIPTIONS, SPELL_NAMES
 from talent_data import TALENT_SPELLS, TALENT_TABS
 
@@ -742,6 +742,9 @@ def insert_chat_message(
     battleground crowd) MUST pass it explicitly ('raid'/'bg')
     so they are not silenced by GroupChatter.Enable.
     """
+    if is_model_artifact(message):
+        logger.warning('Dropped model artifact from %s (%s)', bot_name, channel)
+        return None
     if owner_subsystem is None:
         if channel in ('party', 'raid'):
             # Group is the dominant party/raid producer.

@@ -191,10 +191,9 @@ def parse_single_response(response: str) -> dict:
             data = json.loads(candidate)
             if isinstance(data, dict) and 'message' in data:
                 msg = data.get('message', '')
-                if isinstance(msg, str):
-                    msg = msg.strip().strip('"')
-                else:
-                    msg = str(msg).strip()
+                msg = msg.strip().strip('"') if isinstance(msg, str) else ''
+                if is_model_artifact(msg):
+                    msg = ''
 
                 # Validate emote
                 raw_emote = data.get('emote')
@@ -209,6 +208,8 @@ def parse_single_response(response: str) -> dict:
                     'emote': emote,
                     'action': action,
                 }
+            if isinstance(data, (dict, list)) or data is None:
+                return {'message': '', 'emote': None, 'action': None}
         except (json.JSONDecodeError, ValueError):
             continue
 
@@ -226,7 +227,7 @@ def parse_single_response(response: str) -> dict:
         except (json.JSONDecodeError, ValueError):
             decoded = raw
         return {
-            'message': decoded,
+            'message': '' if is_model_artifact(decoded) else decoded,
             'emote': None,
             'action': None,
         }
@@ -251,7 +252,7 @@ def parse_single_response(response: str) -> dict:
             r'\s*,?\s*"(?:emote|action)\b.*$', '', decoded
         )
         return {
-            'message': decoded.strip(),
+            'message': '' if is_model_artifact(decoded) else decoded.strip(),
             'emote': None,
             'action': None,
         }
@@ -260,6 +261,8 @@ def parse_single_response(response: str) -> dict:
     # leaked JSON scaffolding so users never see raw
     # `{ "message": "...` in chat.
     msg = cleaned.strip().strip('"')
+    if is_model_artifact(msg):
+        msg = ''
     if msg.startswith('{'):
         m = re.search(
             r'"message"\s*:\s*"?(.*)$', msg, re.DOTALL
@@ -271,6 +274,17 @@ def parse_single_response(response: str) -> dict:
         'emote': None,
         'action': None,
     }
+
+
+def is_model_artifact(message: str) -> bool:
+    """Reject null placeholders and JSON envelopes posing as spoken text."""
+    if not isinstance(message, str):
+        return True
+    text = message.strip()
+    if re.fullmatch(r'(?:null|none|n/a)[.!?]?', text, re.IGNORECASE):
+        return True
+    return bool(re.match(r'^\s*(?:\{\s*["\']|\[\s*\{|```json\b)',
+                         text, re.IGNORECASE))
 
 
 def _lowercase_action_start(action: str) -> str:

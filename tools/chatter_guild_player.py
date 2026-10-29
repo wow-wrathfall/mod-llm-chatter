@@ -24,6 +24,7 @@ from chatter_llm import call_llm
 from chatter_guild_profile import get_guild_profile, guild_identity_lines
 from chatter_mode import build_player_chat_guidance, is_roleplay
 from chatter_player_context import player_character_lines
+from chatter_quest_help import quest_help_context
 from chatter_prompts import (
     generate_conversation_length_sequence,
 )
@@ -817,6 +818,7 @@ def _generate_single_reply(
     metadata: Dict,
     guild_context: Optional[List[str]] = None,
     player_lines: Optional[List[str]] = None,
+    quest_context: str = '',
 ) -> List[Dict]:
     brief_casual = bool(
         metadata.get('guild_brief_casual')
@@ -836,6 +838,8 @@ def _generate_single_reply(
         guild_context=guild_context,
         player_lines=player_lines,
     )
+    if quest_context:
+        prompt += quest_context
     response = call_llm(
         client,
         prompt,
@@ -1368,6 +1372,12 @@ def process_guild_player_message_event(
             )
     brief_casual = bool(addressed.get('brief_casual'))
     reply_optional = bool(addressed.get('reply_optional'))
+    quest_context = quest_help_context(
+        db, config, player_guid, player_message,
+    )
+    if quest_context:
+        brief_casual = False
+        reply_optional = False
     if not should_reply_to_optional_casual(config, addressed):
         logger.info(
             "guild_player_message player=%s left unanswered "
@@ -1376,7 +1386,7 @@ def process_guild_player_message_event(
         )
         _mark_event(db, event_id, 'skipped')
         return False
-    if reply_optional or (brief_casual and not multi_addressed):
+    if quest_context or reply_optional or (brief_casual and not multi_addressed):
         topology, responder_count = 'single', 1
     else:
         topology, responder_count = _choose_topology(
@@ -1403,7 +1413,8 @@ def process_guild_player_message_event(
     responders = prepare_guild_speakers(db, client, config, responders)
 
     callback_requested = (
-        not brief_casual
+        not quest_context
+        and not brief_casual
         and memory_enabled
         and bool(summary or len(recent) > 2)
         and random.randint(1, 100)
@@ -1425,7 +1436,8 @@ def process_guild_player_message_event(
         )
     )
     question_requested = (
-        not brief_casual
+        not quest_context
+        and not brief_casual
         and random.randint(1, 100)
         <= _bounded_percent(
             config,
@@ -1513,6 +1525,7 @@ def process_guild_player_message_event(
             metadata,
             guild_context=guild_context,
             player_lines=player_lines,
+            quest_context=quest_context,
         )
     else:
         messages = _generate_multi_reply(
@@ -1555,6 +1568,7 @@ def process_guild_player_message_event(
             metadata,
             guild_context=guild_context,
             player_lines=player_lines,
+            quest_context=quest_context,
         )
 
     if (

@@ -36,6 +36,7 @@ from chatter_constants import (
     EMOTE_LIST_STR,
 )
 from chatter_text import (
+    is_model_artifact,
     strip_speaker_prefix,
     parse_single_response,
     _sanitize_action,
@@ -3996,6 +3997,8 @@ def parse_conversation_response(
                     continue
                 speaker = str(msg.get('speaker') or '').strip()
                 message = str(msg.get('message') or '').strip()
+                if is_model_artifact(message):
+                    message = ''
                 raw_emote = msg.get('emote')
                 emote = validate_emote(raw_emote)
                 if speaker and (
