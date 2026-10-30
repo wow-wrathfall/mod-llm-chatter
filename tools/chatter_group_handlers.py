@@ -34,6 +34,9 @@ from chatter_shared import (
     strip_conversation_actions,
     localize_creature_name,
     localize_item_name,
+    describe_item_type,
+    loot_roll_states_use,
+    loot_roll_use_ideas,
     localize_quest_name,
     shorten_chat_message,
     brief_casual_response_fits,
@@ -89,6 +92,7 @@ from chatter_persona import (
 from chatter_group_prompts import (
     build_kill_reaction_prompt,
     build_loot_reaction_prompt,
+    build_loot_roll_prompt,
     build_combat_reaction_prompt,
     build_death_reaction_prompt,
     build_levelup_reaction_prompt,
@@ -183,7 +187,7 @@ def _pvp_kill_memory(db, ctx):
     config = ctx['config']
     mem_chance = int(config.get(
         'LLMChatter.Memory'
-        '.PvPKillGenerationChance', 10
+        '.PvPKillGenerationChance', 30
     ))
     if random.random() * 100 >= mem_chance:
         return
@@ -237,7 +241,7 @@ def _kill_post_success(db, ctx, message):
     creature_name = ctx['creature_name']
     boss_mem_chance = int(config.get(
         'LLMChatter.Memory'
-        '.BossKillGenerationChance', 60
+        '.BossKillGenerationChance', 70
     ))
     mc = db.cursor(dictionary=True)
     mc.execute(
@@ -475,6 +479,104 @@ def process_group_loot_event(
             _loot_msg_xform(db, msg, event)
         ),
         label='reaction_loot',
+    )
+
+
+def _loot_roll_is_equipment(extra_data) -> bool:
+    """C++ sends item_is_equipment; older payloads lack it, and any
+    item with an equipment slot counts as equipment."""
+    flag = extra_data.get('item_is_equipment')
+    if flag is not None:
+        return bool(int(flag))
+    try:
+        return int(extra_data.get('item_inventory_type') or 0) != 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _loot_roll_use_fields(extra_data) -> dict:
+    """Whether the bot can use the item (C++ item_use), stated only
+    for kinds where it means something, and the idea list built
+    from it. Older payloads without item_use state nothing."""
+    item_class = extra_data.get('item_class', -1)
+    item_subclass = extra_data.get('item_subclass', 0)
+    is_equipment = _loot_roll_is_equipment(extra_data)
+    item_use = extra_data.get('item_use') or None
+    try:
+        required_level = int(
+            extra_data.get('item_required_level') or 0)
+    except (TypeError, ValueError):
+        required_level = 0
+    return {
+        'item_use': (
+            item_use
+            if loot_roll_states_use(
+                item_class, item_subclass, is_equipment)
+            else None),
+        'required_level': required_level,
+        'use_ideas': loot_roll_use_ideas(
+            item_class, item_subclass, is_equipment,
+            item_use, required_level),
+    }
+
+
+def process_group_loot_roll_event(
+    db, client, config, event
+):
+    """Handle a bot_group_loot_roll event.
+
+    A party bot that rolled Need or Greed on an item
+    says why in party chat. C++ applies the chance,
+    cooldown and per-item cap, and drops the line at
+    delivery if the roll has closed by then.
+    """
+    return run_group_handler(
+        db, client, config, event,
+        event_type_label='bot_group_loot_roll',
+        extract_fields=lambda ed: {
+            'item_name': localize_item_name(
+                db, ed.get(
+                    'item_name', 'something'),
+                ed.get('item_entry')),
+            'item_quality': int(
+                ed.get('item_quality', 2)),
+            'item_entry': int(
+                ed.get('item_entry', 0)),
+            'roll_vote': (
+                'need'
+                if str(ed.get('roll_vote', '')).lower()
+                    == 'need'
+                else 'greed'),
+            'item_type': describe_item_type(
+                ed.get('item_class', -1),
+                ed.get('item_subclass', 0),
+                ed.get('item_inventory_type', 0)),
+            **_loot_roll_use_fields(ed),
+        },
+        build_prompt=lambda ctx: (
+            build_loot_roll_prompt(
+                ctx['bot'], ctx['traits'],
+                ctx['item_name'],
+                ctx['item_quality'],
+                ctx['mode'],
+                ctx['roll_vote'],
+                ctx['item_type'],
+                chat_history=ctx['chat_hist'],
+                extra_data=ctx['extra_data'],
+                speaker_talent_context=(
+                    ctx['speaker_talent']),
+                stored_tone=ctx['stored_tone'],
+                map_id=ctx['map_id'],
+                item_use=ctx['item_use'],
+                required_level=ctx['required_level'],
+                use_ideas=ctx['use_ideas'],
+            )
+        ),
+        needs_map_id=True,
+        message_transform=lambda msg: (
+            _loot_msg_xform(db, msg, event)
+        ),
+        label='reaction_loot_roll',
     )
 
 
@@ -820,7 +922,7 @@ def _levelup_post_success(db, ctx, message):
 
     mem_chance = int(config.get(
         'LLMChatter.Memory'
-        '.LevelUpGenerationChance', 50
+        '.LevelUpGenerationChance', 60
     ))
     if random.random() * 100 < mem_chance:
         queue_memory(
@@ -1411,7 +1513,7 @@ def _achievement_post_success(db, ctx, message):
     achievement_name = ctx['achievement_name']
     achv_chance = int(config.get(
         'LLMChatter.Memory'
-        '.AchievementGenerationChance', 35
+        '.AchievementGenerationChance', 60
     ))
     mc = db.cursor(dictionary=True)
     mc.execute(
@@ -1931,7 +2033,7 @@ def process_group_zone_transition_event(
         try:
             ambient_chance = int(config.get(
                 'LLMChatter.Memory.AmbientChance',
-                15,
+                20,
             ))
             if (
                 ambient_chance > 0
@@ -2786,7 +2888,7 @@ def _nearby_object_conversation(
 
     # Scale tokens with number of bots
     max_tokens = int(config.get(
-        'LLMChatter.MaxTokens', 200
+        'LLMChatter.MaxTokens', 350
     ))
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000
@@ -3082,7 +3184,7 @@ def execute_player_msg_conversation(
     # Token budget: max_tokens * (1 + num_bots),
     # capped at 1000
     max_tokens = int(config.get(
-        'LLMChatter.MaxTokens', 200
+        'LLMChatter.MaxTokens', 350
     ))
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000
@@ -3453,7 +3555,7 @@ def _quest_complete_conversation(
     num_bots = len(bots)
     bot_names = [b['name'] for b in bots]
     max_tokens = int(config.get(
-        'LLMChatter.MaxTokens', 200
+        'LLMChatter.MaxTokens', 350
     ))
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000
@@ -3553,7 +3655,7 @@ def _quest_objectives_conversation(
     num_bots = len(bots)
     bot_names = [b['name'] for b in bots]
     max_tokens = int(config.get(
-        'LLMChatter.MaxTokens', 200
+        'LLMChatter.MaxTokens', 350
     ))
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000
@@ -3653,7 +3755,7 @@ def _quest_accept_conversation(
     num_bots = len(bots)
     bot_names = [b['name'] for b in bots]
     max_tokens = int(config.get(
-        'LLMChatter.MaxTokens', 200
+        'LLMChatter.MaxTokens', 350
     ))
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000

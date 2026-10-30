@@ -1,5 +1,87 @@
 # Changelog
 
+### 2026-10-28 - Settings Behave the Same With or Without Every Key
+
+* **Missing keys now mean the shipped defaults**: when a setting was absent
+  from a config, the module used its own built-in value, which often
+  differed from the template (for example `MaxTokens` 200 instead of 350,
+  `BotSpeakerCooldownSeconds` 900 instead of 120, the quest reaction
+  chances 100 instead of 50, the party chat gaps, the memory chances and
+  the screenshot intervals). Every built-in value now matches
+  `mod_llm_chatter.conf.dist`, and template comments that named a different
+  default were corrected. Configured values are unaffected. A config
+  without `GuildChatter.Enable` no longer has the bridge skip the Guild
+  events the server queues.
+* **General's first reply cap is a setting**: the 5-second limit on the
+  first bot reply to a player's General message is now
+  `GeneralChat.FirstReplyMaxDelay` (default 5; `0` removes it, so
+  `ResponsiveDelayMin/Max` apply unchanged).
+* **Every setting is in both templates**: `GroupChatter.BotQuestionCooldown`
+  and `TalentInjectionChance` are now listed, and the quieter preset gained
+  the priority, group-setup retry and OpenAI-compatible settings it was
+  missing, so both files list the same keys.
+* **Removed**: `PrioritySystem.SafetyEnable`, which nothing used.
+* The server-side defaults need a worldserver rebuild; restart the chatter
+  bridge (and the screenshot agent, if used) for the rest.
+
+### 2026-10-28 - Architecture Guide and Priority Settings Brought Up to Date
+
+* **Architecture guide matches the code again**: the battleground node
+  settings carry their real `BGChatter.AB.*` names, the removed global
+  message caps and the old "2 second floor" reply delay are gone (replies
+  to players wait 4-8 seconds, `ResponsiveDelayMin`/`Max`), and every
+  source file, Python module, script registration and database table is
+  listed with its owner and current size. New short sections cover the
+  startup health check, the group setup retry and per-label model routing.
+* **Priority settings are in the config template**: `PrioritySystem.Enable`,
+  `.DeliveryOrderEnable`, `.BridgeYieldEnable` and the eight per-tier
+  reaction delays (`.ReactRange.*`) were read by the module but missing
+  from `mod_llm_chatter.conf.dist`. They are now listed with their current
+  defaults, so nothing changes until you edit them. `.SafetyEnable` is
+  described honestly: it is read and logged, but nothing uses it yet.
+* **Priority behavior described as it works**: the architecture guide and
+  the documentation no longer promise a bridge "yield mode" for ambient
+  and idle work, a provider-safety mode or pre-cache fairness under urgent
+  backlog. They now describe the per-group lock lanes, the claim and
+  delivery ordering, and the Guild profile scan that waits for urgent
+  events.
+* **Logic documentation matches the code again**: the full
+  `mod-llm-chatter-documentation.md` was checked against the source.
+  Defaults now show the shipped template values (General relay, raid
+  morale, `EmoteChance`, request logging, memory and proximity cooldowns),
+  and descriptions follow the code: Arathi Basin node lines are retried
+  and sent to the whole battleground, raid lines go to raid chat, each
+  channel's reply timing is described separately, Guild topic choice and
+  its deliberate silence on casual messages are explained, and the login
+  cleanup grace is 5 minutes. The file maps, script registrations and the
+  14 database tables are complete, and removed functions and old
+  "Session" wording are gone.
+
+### 2026-10-27 - Bots Explain Their Loot Rolls
+
+* **Bots explain their loot rolls**: when a party bot rolls Need or Greed
+  on an item, it may say in party chat why it wants it. The prompt gives
+  facts only: the item with its type and subtype (two-handed sword, plate
+  chest piece, ring, meta gem, tailoring pattern...), the vote, and
+  whether the bot can actually use the item (class, proficiency, skill or
+  level). Its personality decides the reason; possible uses are offered
+  only as ideas (#86, thanks Vladimir37).
+* **Kept rare**: each vote has a chance to be commented, and a group waits
+  out a cooldown between commented rolls, with separate values for Need
+  and Greed (`LootRollComment.NeedChance` 50 / `.GreedChance` 25,
+  `.NeedCooldown` 90 s / `.GreedCooldown` 180 s). Playerbots roll Greed on
+  most items, so Greed comments are rarer. At most two bots comment per
+  item (`.MaxPerItem`). Comments on Need and Greed rolls, and on equipment
+  and other items, can each be turned off (`.NeedEnable`, `.GreedEnable`,
+  `.EquipmentEnable`, `.OtherEnable`). The quieter preset uses 25% / 10%,
+  180 s / 360 s and one bot per item.
+* **Never late, never elsewhere**: a vote is commented only when it is
+  seen while the roll is open, and a comment whose roll has closed, or
+  whose bot has left the group, is cancelled or dropped at delivery
+  instead of arriving after the roll was decided or in another party.
+* Needs the `data/sql/characters/updates/20261022_loot_roll_comments.sql`
+  update and a worldserver rebuild.
+
 ### 2026-10-26 - Guild Post Fixes and a Spoiler-Free Scarlet Enclave
 
 * **Guild posts about NPCs read naturally**: an NPC whose title lists
